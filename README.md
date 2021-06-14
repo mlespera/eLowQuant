@@ -12,4 +12,4 @@ Files:
 	- AssaySummary-ML.csv (Klymus results)  
 	- eLowQuant.Rmd (Rmarkdown file for general use)  
 
-Note:  To knit an Rmarkdown file to create a pdf file, your computer must have installed a version of latex or use the package tinytex.  If you do not have this, then knit to html.
+Note:  To knit an Rmarkdown file to create a pdf file, your computer must have installed a version of latex or use the package tinytex.  If you do not have this, then you can knit to html.
