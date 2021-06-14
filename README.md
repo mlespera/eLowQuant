@@ -5,7 +5,9 @@ This repository contains the Rmarkdown (.Rmd) , R (.R) and csv files used to com
 
 Files:  
 	- PoissonCalib-7Apr2021.Rmd (Rmarkdown file for publication computations)  
-	- PoissonCalib-Functions-7April2021.R (R functions used by Rmd file)  
+	- PoissonCalib-7Apr2021.pdf (rendered pdf from Rmd file)  
+	- PoissonCalib-7Apr2021.html (rendered html from Rmd file)  
+	- PoissonCalib-Functions-7April2021.R (R functions used by Rmd file)   
 	- GEDWG_LOD_DATA3.csv (Klymus data)   
 	- AssaySummary-ML.csv (Klymus results)  
 	- eLowQuant.Rmd (Rmarkdown file for general use)  
