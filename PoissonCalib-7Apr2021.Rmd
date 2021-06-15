@@ -16,12 +16,6 @@ output:
 geometry: margin=.5in
 fontsize:  11pt
 ---
-```{r setup, include=FALSE}
-#ML See EcoF-PoissonBlank-gBlockAll-17June2020.Rmd
-knitr::opts_chunk$set(echo = TRUE, fig.height=7, fig.width=6.5)
-knitr::opts_chunk$set(fig.pos = '!h')
-sink.indicator <- FALSE   #sinks results to files if TRUE
-```
 
 <!-- Turned off numbering for Supplemental File -->
 <!-- \pagenumbering{gobble} -->
@@ -69,6 +63,12 @@ source("PoissonCalib-Functions-7April2021.R")
 
 ```
 
+```{r setup, include=FALSE}
+#ML See EcoF-PoissonBlank-gBlockAll-17June2020.Rmd
+knitr::opts_chunk$set(echo = TRUE, fig.height=7, fig.width=6.5)
+knitr::opts_chunk$set(fig.pos = '!h')
+sink.indicator <- FALSE   #sinks results to files if TRUE
+```
 
 ```{r READIN, include=FALSE}
 ## READIN paragraph adapted from Merkes, Christopher <cmerkes@usgs.gov>
@@ -145,7 +145,7 @@ Quantitation of DNA Copy Number", Anal. Chem., 2011, 83 (22), pp 8604–8610
 use a Poisson approximation for quantitation.
 Before that, Dube et al. 2008, "Mathematical analysis of copy number 
 variation in a DNA sample
-using digital PCR on a nanofluidic device", POlS One, Vol 3, Issue 8, e2876,
+using digital PCR on a nanofluidic device", PloS One, Vol 3, Issue 8, e2876,
 model the number of molecules in each chamber as a Poisson process, giving the 
 relationship between $p$ and $\lambda$.
 
@@ -291,8 +291,8 @@ for(i in 1:nTargets) {
          length=0.05, angle=90, code=3)
 ## overlay simple regression line and R-squared
   jlm <- lm(lamhat ~ SQ, data=Target.dat)
-  abline(jlm, col=4)
-  legend("topleft", paste('Rsq=',round(summary(jlm)$r.squared, 2)), bty="n")
+  abline(jlm, col=2)
+  legend("topleft", paste('lm Rsq=',round(summary(jlm)$r.squared, 2)), bty="n")
   cat("\n\n")
 }
 
@@ -675,16 +675,16 @@ Follows Lavagnini and Magno 2007, Mass Spectrometry Reviews
 
 - Lc (*LOB Limit of blank*) = critical level is the assay signal above which a response is reliably attributed to the presence of analyte 
 - Ld (*Ld = expected number detects out of NN replicates at concentration LOD*)  = signal corresponding to an analyte concentration xd (*=LOD Limit of Detection*) level which may be a priori expected to be recognized
-- Lq = quantification limit is a signal with a precision which satisfies an expected value (*=gamma_Q*)
+- Lq = quantification limit is a signal with a precision which satisfies an expected value ($=\gamma_Q$)
 
 Lc corresponds to a critical response level or a false positive rate,
 i.e. critical number of detects given NN replicates, 
 above which we would reject the null hypothesis that the concentration/copy number is zero at
-alpha = alphaLc (*=gamma_{FP}*).  It is the critical response level corresponding to the false positive rate
+alpha = alphaLc ($=\gamma_{FP}$).  It is the critical response level corresponding to the false positive rate
 of alphaLc.  Essentially, the test is positive if the Y~Binomial(m, p) > Lc.
 The False Positive Rate is P(Y > Lc | S=0).
 
-Ld is computed to correspond to the false negative rate, beta = betaLd (*=gamma_{FN}*) here.  It is computed so
+Ld is computed to correspond to the false negative rate, beta = betaLd ($=\gamma_{FN}$) here.  It is computed so
 that the probability of observing a new (unknown concentration) response less than or equal to 
 Lc is less than or equal to betaLd.  The probability of observing Lc or less detects if the
 concentration is xd (*=LOD Limit of Detection*) or more is less than or equal to betaLd.  The values of Lc depend on
@@ -695,7 +695,7 @@ and solve for xd.
 
 Lq is less well defined.  The literature suggests using Lq = beta0 + 10 s.e.(beta0), but this
 uses the normality assumption.  Other literature suggests using the "analyte concentration xq (*=LOQ Limit of Quantification*)
-for which the experimental relative standard deviation of the responses reaches a fixed level (*=gamma_Q*),
+for which the experimental relative standard deviation of the responses reaches a fixed level ($=\gamma_Q$),
 for example, the level 0.1." Lavagnini and Magno 2007.  I interpret the term "relative
 standard deviation" to mean the coefficient of variation, CV = sd/mean.
 
