@@ -1,0 +1,1359 @@
+---
+title: "eLowQuant"
+author: "copyright Mary Lesperance"
+date: "20/07/2021"
+output:
+  html_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+  pdf_document:
+    toc: yes
+    toc_depth: 3
+  word_document:
+    toc: yes
+    toc_depth: 3
+geometry: margin=.5in
+fontsize:  11pt
+---
+
+<!-- Turned off numbering for Supplemental File -->
+<!-- \pagenumbering{gobble} -->
+
+# Instructions
+This file performs the computations in the publication, 
+'A Statistical Model for Calibration and Computation of Detection
+and Quantification Limits for Low Copy Number Environmental
+DNA samples' by Lesperance, Allison, Bergman, Hocking, Helbing, *Environmental DNA*, 2021, 00, 1-12 https://doi.org/10.1002/edn3.220.
+
+* Create a folder call Outputs in your working directory.
+* Put your data file in your working directory and put the name
+of the file in the chunk labeled 'READIN' below.
+* Data set csv file requirements.  Columns:  Target, Lab, Cq, SQ
+* For nondetects, set Cq to be empty or NA value
+* For negative controls, set Sq to be empty or 0 or NA value
+* Include negative controls in the csv file!
+* DO NOT DUPLICATE Target names over different Labs!!
+
+* This code uses observations with nonempty data and where phat <1 (num detect<num technical replicates)
+* Only the SQ's up to the first one with  phat==1 are used.
+* Allows for variable numbers of SQ levels per Target.
+* Assumes SQs == NA are zero, i.e. are negative controls.
+
+
+* The code uses the R function optim.  A convergence code 0 indicates successful completion.  
+* Ignore warnings if results are sensible.
+
+* EXECUTE EACH CHUNK LOOKING AT THE OUTPUT.  IN PARTICULAR, LOOK AT THE GRAPHS IN
+THE CHUNK CALLED 'PlotPois' TO DETERMINE IF THE MODEL IS APPROPRIATE.  IT IS NOT
+APPROPRIATE IF 'lm Rsq' is small, i.e. near zero!
+
+* You can send results to files by setting the sink.indicator and Manusink to TRUE and running the code in RStudio.  This currently does not work for all results files when knitting.
+
+
+* If you wish to knit to pdf AND you do NOT have a version of Latex installed
+on your computer, then run the following in your RStudio console:  
+install.packages(“tinytex”); tinytex::install_tinytex()
+
+```{r Packages, include=FALSE}
+# Packages used
+packages = c("dplyr","ggplot2","knitr","kableExtra","RColorBrewer")
+
+## Load or install&load
+package.check <- lapply(packages,
+  FUN = function(x) {
+    if (!require(x, character.only = TRUE)) {
+      install.packages(x, dependencies = TRUE)
+      library(x, character.only = TRUE)
+    }
+  }
+)
+
+## Source the functions
+source("eLowQuant-Functions-V20210407.R")
+
+```
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.height=7, fig.width=6.5)
+knitr::opts_chunk$set(fig.pos = '!h')
+#sink.indicator <- FALSE   #sinks results to files if TRUE
+sink.indicator <- TRUE
+```
+
+
+```{r READIN, include=FALSE}
+## READIN paragraph adapted from Merkes, Christopher <cmerkes@usgs.gov>
+##   Used only to read in the data.
+
+
+## Read in your data file (MODIFY FILE NAME AS NEEDED):
+DAT <- read.csv("EXAMPLE_eLowQuant.csv")
+dim(DAT)
+
+## Create an analysis log file:
+write(paste0("Analysis started: ",date(),"\n\n"),file="Outputs\\Analysis Log.txt")
+
+## Check the data:
+if(sum(colnames(DAT)=="Target")!=1) { #Is there a "Target" column?
+  A <- grep("target", colnames(DAT), ignore.case=T)
+  if(length(A)==1) { colnames(DAT)[A] <- "Target" } #Rename target column if it is mispelled but can be identified and there is only 1.
+  if(length(A)!=1) { write("There is a problem with the 'Target' column.\n\n",file="Analysis Log.txt",append=T) } #Add error message to analysis log.
+  if(length(A)>1) { cat("ERROR: multiple 'Target' columns detected.",colnames(DAT)[A],sep="\n") }
+  if(length(A)==0) { print("ERROR: cannot detect 'Target' column.") }
+}
+
+if(sum(colnames(DAT)=="Lab")!=1) { #Is there a "Lab" column?
+  A <- grep("lab", colnames(DAT), ignore.case=T)
+  if(length(A)==1) { colnames(DAT)[A] <- "Lab" } #Rename Lab column if it is mispelled but can be identified and there is only 1.
+  if(length(A)!=1) { write("There is a problem with the 'Lab' column.\n\n",file="Analysis Log.txt",append=T) } #Add error message to analysis log.
+  if(length(A)>1) { cat("ERROR: multiple 'Lab' columns detected.",colnames(DAT)[A],sep="\n") }
+  if(length(A)==0) { print("ERROR: cannot detect 'Lab' column.") }
+}
+
+if(sum(colnames(DAT)=="Cq")!=1) { #Is there a "Cq" column?
+  A <- grep("cq|ct|cycle",colnames(DAT),ignore.case=T)
+  if(length(A)==1) { colnames(DAT)[A] <- "Cq" } #Rename cq column if it is mispelled but can be identified and there is only 1.
+  if(length(A)!=1) { write("There is a problem with the 'Cq' column.\n\n",file="Analysis Log.txt",append=T) } #Add error message to analysis log.
+  if(length(A)>1) { cat("ERROR: multiple 'Cq' columns detected.",colnames(DAT)[A],sep="\n") }
+  if(length(A)==0) { print("ERROR: cannot detect 'Cq' column.") }
+}
+
+if(sum(colnames(DAT)=="SQ")!=1) { #Is there a "SQ" column?
+  A <- grep("sq|copies|starting|quantity",colnames(DAT),ignore.case=T)
+  if(length(A)==1) { colnames(DAT)[A] <- "SQ" } #Rename SQ column if it is mispelled but can be identified and there is only 1.
+  if(length(A)!=1) { write("There is a problem with the 'SQ' column.\n\n",file="Analysis Log.txt",append=T) } #Add error message to analysis log.
+  if(length(A)>1) { cat("ERROR: multiple 'SQ' columns detected.",colnames(DAT)[A],sep="\n") }
+  if(length(A)==0) { print("ERROR: cannot detect 'SQ' column.") }
+}
+
+## Ensure data is in the proper format:
+DAT$Target <- as.factor(DAT$Target)
+DAT$Lab <- as.factor(DAT$Lab)  #ML
+DAT$Cq <- suppressWarnings(as.numeric(as.character(DAT$Cq))) #Non-numerical values (i.e. negative wells) will be converted to NAs
+DAT$SQ <- suppressWarnings(as.numeric(as.character(DAT$SQ))) #Non-numerical values (i.e. NTC) will be converted to NAs
+
+## ML Remove positive controls
+# dim(DAT)
+# DAT <- DAT[DAT$Content!='Pos Ctrl',]
+# dim(DAT)
+
+## ML assume SQs == NA are zero - negative controls
+DAT$SQ[is.na(DAT$SQ)] <- 0
+dim(DAT)
+summary(DAT)
+DAT.df <- data.frame(DAT)
+
+```
+
+
+
+# Process/Summarize samples by Lab; Compute the Poisson estimates of SQ
+
+Hindson et al "High-Throughput Droplet Digital PCR System for Absolute 
+Quantitation of DNA Copy Number", Anal. Chem., 2011, 83 (22), pp 8604–8610
+use a Poisson approximation for quantitation.
+Before that, Dube et al. 2008, "Mathematical analysis of copy number 
+variation in a DNA sample
+using digital PCR on a nanofluidic device", PloS One, Vol 3, Issue 8, e2876,
+model the number of molecules in each chamber as a Poisson process, giving the 
+relationship between $p$ and $\lambda$.
+
+```{r detect, echo=FALSE}
+## Summarize data by (Target, SQ), detect=#detections, n=#tech reps
+DAT.Tar.SQ <-  DAT.df %>%
+  group_by(Target, SQ) %>%
+  summarise(detect=sum(!is.na(Cq)), n=n(),  Cqmean=mean(Cq, na.rm=TRUE), 
+            Lab=Lab[1] )
+DAT.Tar.SQ <- droplevels(data.frame(DAT.Tar.SQ))
+dim(DAT.Tar.SQ); cat('dim, before negative controls added')
+summary(DAT.Tar.SQ)
+
+uLabs <- unique(DAT.Tar.SQ$Lab) #unique labs
+
+## ML check the data for each Lab
+# if(sink.indicator){
+#   sink(file='Outputs\\SummariesRaw.txt', split=TRUE)}
+# for(i in uLabs){
+#   print(knitr::kable(DAT.Tar.SQ[DAT.Tar.SQ$Lab==i,], format="pandoc", 
+#   digits=3, caption=i), results="asis")
+# }
+# if(sink.indicator){ sink()}
+
+## All labs had negative controls, some of which were omitted in gBlock file
+## If lab has no technical replicates with SQ=0, 
+## Add in Negative Control (ntc) zeroes (24/(48 for Monroe) technical replicates)
+
+# ntc.rows <- tibble(Target=factor(0), SQ=0, detect=0, n=0, Cqmean=0, Lab=factor(0))
+# for (i in unique(DAT.Tar.SQ$Target)){
+#   nn=24
+#   if ((DAT.Tar.SQ$Lab[DAT.Tar.SQ$Target==i])[1]=="Monroe") nn=48
+#   if(min(DAT.Tar.SQ$SQ[DAT.Tar.SQ$Target==i])!=0){
+#        ntc.rows <- ntc.rows %>% add_row(Target=i, 
+#                                      SQ=0, detect=0, n=nn, Cqmean=NA, 
+#                                      Lab=(DAT.Tar.SQ$Lab[DAT.Tar.SQ$Target==i])[1])
+#   }
+# }
+# ntc.rows <- data.frame(ntc.rows[-1,])  #remove the first row
+# # DAT.Tar.SQ <- DAT.Tar.SQ %>% add_row(ntc.rows)  #no longer works
+# suppressWarnings(DAT.Tar.SQ <- DAT.Tar.SQ %>% bind_rows(ntc.rows))
+# DAT.Tar.SQ$Target <- as.factor(DAT.Tar.SQ$Target)
+# DAT.Tar.SQ$Lab <- as.factor(DAT.Tar.SQ$Lab)  
+
+DAT.Tar.SQ <- arrange(DAT.Tar.SQ, Lab, Target, SQ) #sort data by SQ in Target in Lab
+
+#write.csv(DAT.Tar.SQ, "DAT.Tar.SQ.csv")  #write the data to file
+
+## Add variables to data set:  L10.SQ, phat, ... 
+DAT.Tar.SQ <- within(DAT.Tar.SQ, {
+  L10.SQ <- log10(SQ)  
+  phat <- detect/n           #sample proportion detect
+  vphat <- phat*(1-phat)/n   #var of phat
+  lamhat <- -log(1-phat) 
+  vlamhat <- phat/n/(1-phat)  #var of lamhat using the delta method
+  sdlamhat <- sqrt(vlamhat)   #sd of lamhat using the delta method
+  MElamhat <- 1.96*sdlamhat  #margin of error for lambda hat using delta method
+}
+)
+dim(DAT.Tar.SQ) 
+# cat('dim, Added 24/48 negative controls for Targets with zero ntc') 
+# head(DAT.Tar.SQ)
+
+## All Targets and Labs **DO NOT DUPLICATE Target names over Labs!!
+uLabs <- unique(DAT.Tar.SQ$Lab)
+uTargets <- unique(DAT.Tar.SQ$Target)
+nTargets <- length(uTargets)
+uLabsTargets <- unique(DAT.Tar.SQ[,c('Lab','Target')])
+uLabsTargets$Lab <- as.character(uLabsTargets$Lab)
+#ensure ulabsTargets in same order as uTargets
+uLabsTargets <- uLabsTargets[match(uLabsTargets$Target, uTargets),]  
+uLabsTargets.names <- apply(uLabsTargets, 1, paste, collapse=', ')
+
+## Print summary tables.  If sink.indicator set to TRUE, writes tables to file.
+{
+if(sink.indicator){
+  sink(file='Outputs\\Summaries.txt', split=TRUE)}
+for(i in uLabs){
+  print(knitr::kable(DAT.Tar.SQ[DAT.Tar.SQ$Lab==i, c(1:4, 12)], format="pandoc", digits=3, caption=i),
+        results="asis")
+}
+if(sink.indicator)  sink()
+}
+
+```
+
+
+
+```{r ExactTransCI, echo=FALSE}
+## Exact 95% Binomial Confidence intervals => backtransform given alpha and beta
+## Binomial bound from Julious 2005, Stat in Medicine
+
+DAT.Tar.SQ <- within(DAT.Tar.SQ, {
+  CIexphat.lower <-  1 - qbeta(.975, n-detect+1, detect)  #exact phat bounds
+  CIexphat.upper <-  qbeta(.975, detect+1, n-detect)
+
+## Use transformed exact phat bounds
+  Lamhatex.Lower <- -log(1 - CIexphat.lower)
+  Lamhatex.Upper <- -log(1 - CIexphat.upper)
+}
+)
+
+```
+
+# Plot the Poisson estimates (and CI) of SQ for levels that had non-detects
+Only the first levels of SQ that had non-detects are analyzed. 
+Red line is least squares linear regression line.
+
+LOOK AT THE GRAPHS IN
+THE CHUNK CALLED 'PlotPois' TO DETERMINE IF THE MODEL IS APPROPRIATE.  IT IS NOT
+APPROPRIATE IF 'lm Rsq' is small, i.e. near zero!
+
+*ML*  ??will error if all phats==1
+
+```{r PlotPois, warning=FALSE, echo=FALSE}
+#Graphs can be saved as pdf or postscript using the codes below.  
+# Remember to run dev.off() at the bottom if you send graphs to file.
+#pdf('Outputs\\lamhat.pdf')
+#postscript('\\Outputs\\lamhat.eps')
+
+#Plots 2 by 2 on a page if there are more than 3 assays; plots 2
+# on a page if there are 2 assays.
+#Comment out the two lines below to put one plot on a page.
+ if(nTargets>3) par(mfrow=c(2,2))
+ if(nTargets==2) par(mfrow=c(1,2))
+
+## Use observations with nonempty data and where phat <1
+## Only the SQ's before the first one with phat==1 are used
+## Allows for variable numbers of SQ levels per Target
+
+nndetect <- vector("list", nTargets) 
+nrowTarget <- rep(0, length=nTargets)
+
+for(i in 1:nTargets) {
+  Target.dat <- subset(DAT.Tar.SQ, Target==uTargets[i])
+  bSQ <- !is.na(Target.dat$phat)  
+  lastSQ <- as.logical(cumprod(Target.dat$phat!=1 & bSQ)) 
+## removes first observations with SQ with phat=1 and larger SQs
+  Target.dat <- Target.dat[lastSQ,]
+  nndetect[i] <- list(Target.dat )
+  nrowTarget[i] <- nrow(Target.dat)
+ 
+  if(nrow(nndetect[[i]]) < 2) {cat(paste('Too few values for ', uTargets[i])); next}
+  
+  maxSQ <- max(Target.dat$SQ)
+  maxlamhat <- max(Target.dat$lamhat)
+  plot(Target.dat$SQ, Target.dat$lamhat, xlog=TRUE, ylab='Lambda hat',
+       xlab='Starting copy number',
+       ylim=c(0, maxlamhat), xlim=c(0, maxSQ), main=uLabsTargets.names[i])
+## Transformed Exact CI
+  arrows(Target.dat$SQ, Target.dat$Lamhatex.Lower, Target.dat$SQ, 
+         Target.dat$Lamhatex.Upper,
+         length=0.05, angle=90, code=3)
+## overlay simple regression line and R-squared
+  jlm <- lm(lamhat ~ SQ, data=Target.dat)
+  abline(jlm, col=2)
+  legend("topleft", paste('lm Rsq=',round(summary(jlm)$r.squared, 2)), bty="n")
+  cat("\n\n")
+}
+
+
+#dev.off()
+par(mfrow=c(1,1))
+```
+
+
+\pagebreak
+
+Both the intercept and no intercept models are fit to the data.  The 'best' of
+the two models is the one with the largest Likelihood Ratio test p-value.
+The 'best' model will be identified in the chunk called *Manuscript*.
+
+# Estimate Poisson models - no intercept model
+
+```{r MLEfit0s, warning=FALSE, echo=FALSE, fig.height=4.5, fig.width=6.5}
+#Graphs can be saved as pdf or postscript using the codes below.  
+# Remember to run dev.off() at the bottom if you send graphs to file.
+#pdf('Outputs\\MLfit0.pdf')
+#postscript('Outputs\\MLfit.eps')
+
+#Puts two plots side-by-side on a page; Comment out for one on a page
+par(mfrow=c(1,2))
+
+## List of results - 0 in name denotes fits through the origin
+Calib.fit.estimates0 <- vector("list", nTargets)  #list of fit estimates
+names(Calib.fit.estimates0) <- uTargets
+Calib.fit.all0 <- vector("list", nTargets)  #list of fits
+Calib.fit.LLRp0 <- vector("numeric", nTargets)
+names(Calib.fit.LLRp0) <- uTargets
+Calib.fit.res0 <- matrix(0, nrow=nTargets, ncol=4)
+rownames(Calib.fit.res0) <- uTargets
+colnames(Calib.fit.res0) <- c("convergence", "LLR", "degf","Pval")
+Calib.fit.res0 <- data.frame(Calib.fit.res0)
+
+
+for(i in 1:nTargets){
+  if(nrow(nndetect[[i]]) < 3) {Calib.fit.estimates0[[i]] <- NULL
+    cat(paste('Too few values for ', uTargets[i]), '\n')
+    next}
+  Target.dat <- nndetect[[i]]
+  
+  # Could use following for starting value
+  # j.glm <- glm(cbind(n-detect, detect)~SQ-1, data=Target.dat, family=binomial(link='log'))
+
+
+   Calib.fit <- optim(par=c(1), fn=CalibOr.LLik,  nd=Target.dat$detect,
+                     S=Target.dat$SQ, nn=Target.dat$n,
+                     method="BFGS", control=list(fnscale=-1), gr=CalibOr.dLLik,
+                     hessian=TRUE)
+  
+   Calib.fit.all0[[i]] <- Calib.fit
+   
+## Variance estimates
+   if(nrow(Target.dat)==2) {
+    Calib.fit.Var <- matrix(0, 2, 2)  #singular hessian for 2 observations
+    }  else { 
+    Calib.fit.Var <- solve(-Calib.fit$hessian)
+    }
+  cmat <- cbind(Calib.fit$par, sqrt(diag(Calib.fit.Var)))
+  cmat <- cbind(cmat, cmat[,1]/cmat[,2])
+  cmat <- cbind(cmat, 2*pnorm(-cmat[, 3]))
+  colnames(cmat) <- c("Estimate", "Std.Err", "Z value", "Pr(>z)")
+  if (nrow(cmat)==1) {rownames(cmat) <- c("beta")
+  } else  rownames(cmat) <- c("alpha","beta")
+  Calib.fit.estimates0[[i]] <- cmat
+  
+## Likelihood ratio statistic and pvalue for goodnes-of-fit of the model
+  Calib.degf <- nrow(Target.dat) - length(Calib.fit$par)
+  #SQ=0 do not contribute to the likelihood for no intercept model
+  bool <- Target.dat$SQ !=0 
+  Calib.LLR <- 2*(Bin.LLik(Target.dat$detect[bool], Target.dat$n[bool]) 
+                  - Calib.fit$value)  
+  Calib.LLR.pv <- pchisq(Calib.LLR, Calib.degf, lower.tail = FALSE)
+  Calib.fit.LLRp0[i] <- Calib.LLR.pv
+  Calib.fit.res0[i,] <- c(Calib.fit$convergence, Calib.LLR, Calib.degf, Calib.LLR.pv)
+   
+
+## Compute fitted values for ML model
+  Calib.fitted <- Calib.fit$par *  Target.dat$SQ
+  
+  # Plot calibration curve on lambda scale
+  maxSQ <- max(Target.dat$SQ)
+  maxlamhat <- max(Target.dat$lamhat)
+
+  plot(Target.dat$SQ, Target.dat$lamhat, xlog=TRUE, 
+       ylab='Lambda hat', xlab='Starting copy number',
+       ylim=c(0, maxlamhat), xlim=c(0, maxSQ), las=1, 
+       main=uTargets[i])
+  abline(0, Calib.fit$par, col=4)
+  legend("topleft", legend=c('ML fit'), lty=1, col=4, bty="n")
+  arrows(Target.dat$SQ, Target.dat$Lamhatex.Lower, Target.dat$SQ, 
+         Target.dat$Lamhatex.Upper,
+         length=0.05, angle=90, code=3)
+
+  
+## Plot calibration curve on phat scale
+## Compute minSQ such that phat~=1 (1-phat = .99)
+##  sqs <- seq(0, maxSQ)
+  maxSQa <- max( -( log(.01))/Calib.fit$par, maxSQ)
+  sqs <- seq(0, maxSQa, by=.1)
+  Calib.phat <- 1 - exp(-( Calib.fit$par * sqs))
+
+  plot(sqs, Calib.phat, xlog=TRUE, 
+       ylab='Proportion detect', xlab='Starting copy number', type='l', col=4, las=1, 
+       ylim=c(0, 1), xlim=c(0, maxSQa),  main=uTargets[i])
+  points(Target.dat$SQ, Target.dat$phat)
+  legend("topleft", legend=c('ML fit'), lty=1, col=4, bty="n")
+  
+cat('\n\n\n')
+
+## If desired, set sink.indicator to TRUE to write results to file.  
+  if(sink.indicator){
+    sink(file(paste("Outputs\\MLNoInter",uTargets[i],".txt", sep=""), 
+            encoding="UTF-8"), split=TRUE)
+  }
+  cat("\n", as.character(uTargets[i]), "\n")
+  cat("Convergence=", Calib.fit$convergence, "\n")
+  printCoefmat(cmat, digits=3)
+  cat('LLR test stat=', Calib.LLR, ', df= ', Calib.degf, ', p-value=', Calib.LLR.pv, "\n\n")
+  if(sink.indicator) sink()
+
+knitr::asis_output("\n\\newpage\n")
+
+
+}
+  
+#dev.off()
+par(mfrow=c(1,1))
+  
+``` 
+  
+\newpage
+  
+# Estimate predicted Sq given number detects and technical replicates - no intercept (not shown)
+The estimated SQ is easily obtained for given new values of nn0=number of replicates, 
+nd0=number detected and the estimated slope betaS 
+as:    Shat <- -(log((nn0 - nd0)/nn0)) / betaS[1]
+The standard errors are obtained from the Hessian matrix 
+(or via the function CalibS0Or.ddLLik()) .
+
+```{r MLES0fits0, warning=FALSE, echo=FALSE, eval=FALSE, include=FALSE}  
+
+  #Calibration estimate of S0 given new nd0=number detected, nn0=number replicates
+  # includes standard errors and p-values
+
+  CalibS0.fit.estimates0 <- vector("list", nTargets)  #list of fits including test value
+  
+  for(i in 1:nTargets){
+#   nd0 <- 32; nn0 <- 96  #test number detects, number technical replicates
+  nd0 <- 3; nn0 <- 8
+#  nd0 <- 1; nn0 <- 3   
+
+     if(nrow(nndetect[[i]]) < 3) {CalibS0.fit.estimates0[[i]] <- NULL
+     cat(paste('Too few values for ', uTargets[i]), '\n') 
+     next}
+   Target.dat <- nndetect[[i]]
+
+
+  CalibS0.fit <- optim(par=c(1, 3), fn=CalibS0Or.LLik,  nd=Target.dat$detect,
+                     S=Target.dat$SQ, nn=Target.dat$n, nd0=nd0, nn0=nn0,
+                     method="BFGS", control=list(fnscale=-1), gr=CalibS0Or.dLLik, 
+                     hessian=TRUE)
+
+  CalibS0.fit.Var <- solve(-CalibS0.fit$hessian)
+  betaS <- CalibS0.fit$par
+  cmat <- cbind(betaS, sqrt(diag(CalibS0.fit.Var)))
+  cmat <- cbind(cmat, cmat[,1]/cmat[,2])
+  cmat <- cbind(cmat, 2*pnorm(-cmat[, 3]))
+  if (nrow(cmat)==2) {rownames(cmat) <- c("beta", "SQ0")
+  } else  rownames(cmat) <- c("alpha","beta", "SQ0")
+  colnames(cmat) <- c("Estimate", "Std.Err", "Z value", "Pr(>z)")
+
+  cat('\n\n','ML estimate of SQ for nd0 number of detects and nn0 replicates', '\n')
+  if(sink.indicator) sink(file(paste("Outputs\\MLNoInterSQ",uTargets[i],
+            ".txt", sep=""), 
+            encoding="UTF-8"), split=TRUE)
+  cat(as.character(uTargets[i]), 'y0=', nd0, 'n0=' , nn0, "\n\n")
+  printCoefmat(cmat, digits=3)
+  if(sink.indicator) sink()
+  
+  CalibS0.fit.estimates0[[i]] <- cmat
+  
+  }
+
+```
+
+# Estimate predicted Sq given consecutive numbers of detects given number of technical replicates - no intercept
+The estimated SQ is easily obtained for given new values of nn0=number of replicates, 
+nd0=number detected and the estimated slope betaS 
+as:    Shat <- -(log((nn0 - nd0)/nn0)) / betaS[1]
+The standard errors are obtained from the Hessian matrix 
+(or via the function CalibS0Or.ddLLik()).
+
+```{r MLES0fits0vec, warning=FALSE, echo=FALSE}  
+
+  #Calibration estimate of S0 given new nd0=number detected, nn0=number replicates
+  # includes standard errors
+
+  CalibS0.table0 <- vector("list", nTargets)  #list of fits including test value
+  
+  for(i in 1:nTargets){
+   nn0 <- 8  #test number technical replicates, greater than 1
+#  nn0 <- 3
+#  nn0 <- 24   
+
+     if(nrow(nndetect[[i]]) < 3) {CalibS0.table0[[i]] <- NULL
+     cat(paste('Too few values for ', uTargets[i]), '\n') 
+     next}
+   
+  Target.dat <- nndetect[[i]]
+  SQS0.fit0 <- matrix(0, ncol=4, nrow=0)
+  
+  for(nd0 in 1:(nn0-1)){
+
+      CalibS0.fit <- optim(par=c(1, 3), fn=CalibS0Or.LLik,  nd=Target.dat$detect,
+                     S=Target.dat$SQ, nn=Target.dat$n, nd0=nd0, nn0=nn0,
+                     method="BFGS", control=list(fnscale=-1), gr=CalibS0Or.dLLik, 
+                     hessian=TRUE)
+
+  CalibS0.fit.Var <- solve(-CalibS0.fit$hessian)
+  betaS <- CalibS0.fit$par
+  cvec <- as.vector(rbind(betaS, sqrt(diag(CalibS0.fit.Var))))
+  SQS0.fit0 <- rbind(SQS0.fit0, cvec)
+  }
+  
+  rownames(SQS0.fit0) <- paste(1:nrow(SQS0.fit0))
+  colnames(SQS0.fit0) <- c("alpha", "SEalpha", "SQ0","SE_SQ0")
+  
+  cat("\n",as.character(uTargets[i]), "\n")
+  cat(' ML estimate of SQ for numbers of detects and', nn0, 'replicates', '\n')
+  if(sink.indicator) sink(file(paste("Outputs\\MLNoInterSQ0",uTargets[i],
+            ".txt", sep=""), 
+            encoding="UTF-8"), split=TRUE)
+  print(knitr::kable(cbind(NumDetects=1:nrow(SQS0.fit0), SQS0.fit0[,3:4]), 
+                     format="pandoc", digits=3),results="asis")
+
+  if(sink.indicator) sink()
+  
+  CalibS0.table0[[i]] <- SQS0.fit0
+  
+  }
+
+```
+
+
+\newpage
+
+# Estimate Poisson models - intercept model 
+
+```{r MLEfits, warning=FALSE, echo=FALSE, fig.height=4.5, fig.width=6.5}
+#pdf('Outputs\\MLfit.pdf')
+#postscript('Outputs\\MLfit.eps')
+
+# if(nTargets>3) par(mfrow=c(2,2))
+# if(nTargets==2) par(mfrow=c(1,2))
+par(mfrow=c(1,2))
+
+# List of results
+Calib.fit.estimates <- vector("list", nTargets)  #list of fit estimates
+names(Calib.fit.estimates) <- uTargets
+Calib.fit.all <- vector("list", nTargets)  #list of fits all
+Calib.fit.LLRp <- vector("numeric", nTargets)
+names(Calib.fit.LLRp) <- uTargets
+Calib.fit.res <- matrix(0, nrow=nTargets, ncol=4)
+rownames(Calib.fit.res) <- uTargets
+colnames(Calib.fit.res) <- c("convergence", "LLR", "degf","Pval")
+Calib.fit.res <- data.frame(Calib.fit.res)
+
+for(i in 1:nTargets){
+  if(nrow(nndetect[[i]]) < 3) {Calib.fit.estimates[[i]] <- NULL
+     cat(paste('Too few values for ', uTargets[i]), '\n')
+    next}
+  Target.dat <- nndetect[[i]]
+  jlm <- lm(lamhat ~ SQ, data=Target.dat) #starting values for alpha and beta
+
+  Calib.fit <- optim(par=pmax(c(0.01, 0.01), coef(jlm)), fn=Calib.LLik,  
+                     nd=Target.dat$detect,
+                     S=Target.dat$SQ, nn=Target.dat$n, gr=Calib.dLLik,
+                     method="BFGS", control=list(fnscale=-1),  hessian=TRUE)
+
+  Calib.fit.all[[i]] <- Calib.fit
+  if(nrow(Target.dat)==2) {
+    Calib.fit.Var <- matrix(0, 2, 2)  #singular hessian for 2 observations
+    }  else { 
+    Calib.fit.Var <- solve(-Calib.fit$hessian)
+    }
+  cmat <- cbind(Calib.fit$par, sqrt(diag(Calib.fit.Var)))
+  cmat <- cbind(cmat, cmat[,1]/cmat[,2])
+  cmat <- cbind(cmat, 2*pnorm(-cmat[, 3]))
+  colnames(cmat) <- c("Estimate", "Std.Err", "Z value", "Pr(>z)")
+  if (nrow(cmat)==1) {rownames(cmat) <- c("beta")
+  } else  rownames(cmat) <- c("alpha","beta")
+  Calib.fit.estimates[[i]] <- cmat
+  
+  #Likelihood ratio statistic and pvalue for goodnes-of-fit of the model
+  Calib.degf <- nrow(Target.dat) - length(Calib.fit$par)
+  Calib.LLR <- 2*(Bin.LLik(Target.dat$detect, Target.dat$n) 
+                  - Calib.fit$value)  
+  Calib.LLR.pv <- pchisq(Calib.LLR, Calib.degf, lower.tail = FALSE)
+  Calib.fit.LLRp[i] <- Calib.LLR.pv
+  Calib.fit.res[i,] <- c(Calib.fit$convergence, Calib.LLR, Calib.degf, Calib.LLR.pv)
+  
+  #Compute fitted values for ML model
+  Calib.fitted <- Calib.fit$par[1] + Calib.fit$par[2]*  Target.dat$SQ  
+
+  # Plot calibration curve on lambda scale
+  maxSQ <- max(Target.dat$SQ)
+  maxlamhat <- max(Target.dat$lamhat)
+
+  plot(Target.dat$SQ, Target.dat$lamhat, xlog=TRUE, 
+       ylab='Lambda hat', xlab='Starting copy number',
+       ylim=c(0, maxlamhat), xlim=c(0, maxSQ),  las=1,
+       main=uTargets[i])
+  abline(Calib.fit$par[1], Calib.fit$par[2], col=4)
+  legend("topleft", legend=c('ML fit'), lty=1, col=4, bty="n")
+  arrows(Target.dat$SQ, Target.dat$Lamhatex.Lower, Target.dat$SQ, 
+         Target.dat$Lamhatex.Upper,
+         length=0.05, angle=90, code=3)
+ 
+  # Plot calibration curve on phat scale
+  # Compute minSQ such that phat~=1
+  maxSQa <-max( -(Calib.fit$par[1] + log(.01))/Calib.fit$par[2], maxSQ)
+  sqs <- seq(0, maxSQa, by=.1)
+  Calib.phat <- 1 - exp(-(Calib.fit$par[1] + Calib.fit$par[2] * sqs))
+
+  plot(sqs, Calib.phat, xlog=TRUE, 
+       ylab='Proportion detect', xlab='Starting copy number', type='l', col=4, las=1, 
+       ylim=c(0, 1), xlim=c(0, maxSQa),  main=uTargets[i])
+  points(Target.dat$SQ, Target.dat$phat)
+  legend("topleft", legend=c('ML fit'), lty=1, col=4, bty="n")
+
+cat("\n\n\n")
+
+## If desired, write results to file.
+  if(sink.indicator){
+    sink(file(paste("Outputs\\ML",uTargets[i],".txt", sep=""), 
+            encoding="UTF-8"), split=TRUE)
+  }
+  cat("\n", as.character(uTargets[i]), "\n")
+  cat("Convergence=", Calib.fit$convergence, "\n")
+  printCoefmat(cmat, digits=3)
+  cat('LLR test stat=', Calib.LLR, ', df= ', Calib.degf, ', p-value=', Calib.LLR.pv, "\n\n")
+  if(sink.indicator) sink()
+
+  knitr::asis_output("\n\\newpage\n")
+
+}   
+#dev.off()
+par(mfrow=c(1,1))
+  
+``` 
+
+\newpage
+
+# Estimate predicted Sq given number detects and technical replicates - intercept model (not shown) 
+  
+
+```{r MLES0fits, warning=FALSE, echo=FALSE, eval=FALSE, include=FALSE}  
+
+  #Calibration estimate of S0 given new nd0=number detected, nn0=number replicates
+  # includes standard errors and p-values
+
+  CalibS0.fit.estimates <- vector("list", nTargets)  #list of fits including test value
+  
+  for(i in 1:nTargets){
+   nd0 <- 32; nn0 <- 96  #test number detects, number technical replicates
+   if(nrow(nndetect[[i]]) < 3) {CalibS0.fit.estimates[[i]] <- NULL
+     cat(paste('Too few values for ', uTargets[i]), '\n') 
+     next}
+   Target.dat <- nndetect[[i]]
+   jlm <- lm(lamhat ~ SQ, data=Target.dat) #starting values for alpha and beta
+   jpar <- pmax(c(0.01, 0.01), coef(jlm))
+   Stilde <- -(log((nn0 - nd0)/nn0) + jpar[1]) / jpar[2]
+
+   CalibS0.fit <- optim(par=c(jpar, Stilde), 
+                       fn=CalibS0.LLik,  nd=Target.dat$detect,
+                       S=Target.dat$SQ, nn=Target.dat$n, nd0=nd0, nn0=nn0,
+                       control=list(fnscale=-1), method="BFGS",
+                       gr=CalibS0.dLLik, hessian=TRUE)
+   
+
+  CalibS0.fit.Var <- solve(-CalibS0.fit$hessian)
+  betaS <- CalibS0.fit$par
+  hess <- CalibS0.ddLLik(betaS, Target.dat$detect, Target.dat$SQ,
+                Target.dat$n, nd0, nn0)
+  
+  cmat <- cbind(betaS, sqrt(diag(CalibS0.fit.Var)))
+  cmat <- cbind(cmat, cmat[,1]/cmat[,2])
+  cmat <- cbind(cmat, 2*pnorm(-cmat[, 3]))
+  if (nrow(cmat)==2) {rownames(cmat) <- c("beta", "SQ0")
+  } else  rownames(cmat) <- c("alpha","beta", "SQ0")
+  colnames(cmat) <- c("Estimate", "Std.Err", "Z value", "Pr(>z)")
+
+  cat('\n\n','ML estimate of SQ for nd0 number of detects and nn0 replicates', '\n')
+  if(sink.indicator) sink(file(paste("Outputs\\MLSQ",uTargets[i],".txt", sep=""), 
+            encoding="UTF-8"), split=TRUE)
+  cat(as.character(uTargets[i]), 'y0=', nd0, 'n0=' , nn0, "\n\n")
+  printCoefmat(cmat, digits=3)
+  if(sink.indicator) sink()
+
+  #ML Double check calculations
+  # Shat <- -(log((nn0 - nd0)/nn0) + betaS[1]) / betaS[2]
+  # cat('\n', 'Shat=', Shat)
+  # cat('\n', 'SEs ', sqrt(diag(solve(-hess))))
+  # cat('\n', 'Marginal ', (1/sqrt(-hess[3,3])))
+  # cat('\n', 'Gradient ', CalibS0.dLLik(betaS, Target.dat$detect, Target.dat$SQ, 
+  #                   Target.dat$n, nd0, nn0), '\n')
+
+  CalibS0.fit.estimates[[i]] <- cmat
+  
+}
+
+```
+
+# Estimate predicted Sq given consecutive numbers of detects given number of technical replicates - intercept model
+The estimated SQ is easily obtained for given new values of nn0=number of replicates, 
+nd0=number detected and the estimated slope betaS 
+as:    Shat <- -(log((nn0 - nd0)/nn0) + betaS[1]) / betaS[2]
+The standard errors are obtained from the Hessian matrix 
+(or via the function CalibS0.ddLLik()).
+
+```{r MLES0fitsvec, warning=FALSE, echo=FALSE}  
+
+  #Calibration estimate of S0 given new nd0=number detected, nn0=number replicates
+  # includes standard errors
+
+  CalibS0.table <- vector("list", nTargets)  #list of fits including test value
+  
+  for(i in 1:nTargets){
+   nn0 <- 8  #test number technical replicates, greater than 1
+#  nn0 <- 3
+#  nn0 <- 24   
+
+     if(nrow(nndetect[[i]]) < 3) {CalibS0.table[[i]] <- NULL
+     cat(paste('Too few values for ', uTargets[i]), '\n') 
+     next}
+   
+  Target.dat <- nndetect[[i]]
+  SQS0.fit <- matrix(0, ncol=6, nrow=0)
+  
+  for(nd0 in 1:(nn0-1)){
+
+   jlm <- lm(lamhat ~ SQ, data=Target.dat) #starting values for alpha and beta
+   jpar <- pmax(c(0.01, 0.01), coef(jlm))
+   Stilde <- -(log((nn0 - nd0)/nn0) + jpar[1]) / jpar[2]
+
+   CalibS0.fit <- optim(par=c(jpar, Stilde), 
+                       fn=CalibS0.LLik,  nd=Target.dat$detect,
+                       S=Target.dat$SQ, nn=Target.dat$n, nd0=nd0, nn0=nn0,
+                       control=list(fnscale=-1), method="BFGS",
+                       gr=CalibS0.dLLik, hessian=TRUE)
+
+  CalibS0.fit.Var <- solve(-CalibS0.fit$hessian)
+  betaS <- CalibS0.fit$par
+  cvec <- as.vector(rbind(betaS, sqrt(diag(CalibS0.fit.Var))))
+  SQS0.fit <- rbind(SQS0.fit, cvec)
+  }
+  
+  rownames(SQS0.fit) <- paste(1:nrow(SQS0.fit))
+  colnames(SQS0.fit) <- c("alpha", "SEalpha", "beta","SEbeta", "SQ0","SE_SQ0")
+  
+  #Negative SQ0 values can occur when there are detects for negative controls
+  # set SQ0 and SE_SQ0 to zero
+  SQS0.fit[ SQS0.fit[,5] < 0, 5:6] <- 0
+  
+  cat("\n",as.character(uTargets[i]), "\n")
+  cat(' ML estimate of SQ for numbers of detects and', nn0, 'replicates', '\n')
+  if(sink.indicator) {
+    sink(file(paste("Outputs\\MLSQ0",uTargets[i],".txt", sep=""), 
+            encoding="UTF-8"), split=TRUE)
+  }
+  print(knitr::kable(cbind(NumDetects=1:nrow(SQS0.fit), SQS0.fit[,5:6]), 
+                     format="pandoc", digits=3),results="asis")
+
+  if(sink.indicator) sink()
+  
+  CalibS0.table[[i]] <- SQS0.fit
+  
+  }
+
+```
+
+\newpage
+
+# Determine Lc, Ld, Lq (LOB, LOD, LOQ) - no intercept model
+Follows Lavagnini and Magno 2007, Mass Spectrometry Reviews
+*The notation in the paper was changed from the Lavagnini 2007 paper and is shown in brackets here.*
+
+- Lc (*LOB Limit of blank*) = critical level is the assay signal above which a response is reliably attributed to the presence of analyte 
+- Ld (*Ld = expected number detects out of NN replicates at concentration LOD*)  = signal corresponding to an analyte concentration xd (*=LOD Limit of Detection*) level which may be a priori expected to be recognized
+- Lq = quantification limit is a signal with a precision which satisfies an expected value ($=\gamma_Q$)
+
+Lc corresponds to a critical response level or a false positive rate,
+i.e. critical number of detects given NN replicates, 
+above which we would reject the null hypothesis that the concentration/copy number is zero at
+alpha = alphaLc ($=\gamma_{FP}$).  It is the critical response level corresponding to the false positive rate
+of alphaLc.  Essentially, the test is positive if the Y~Binomial(m, p) > Lc.
+The False Positive Rate is P(Y > Lc | S=0).
+
+Ld is computed to correspond to the false negative rate, beta = betaLd ($=\gamma_{FN}$) here.  It is computed so
+that the probability of observing a new (unknown concentration) response less than or equal to 
+Lc is less than or equal to betaLd.  The probability of observing Lc or less detects if the
+concentration is xd (*=LOD Limit of Detection*) or more is less than or equal to betaLd.  The values of Lc depend on
+the number of replicates, NN, so xd does as well.  Ld is the expected number of detects at
+values xd (*=LOD Limit of Detection*) and NN replicates. False negative rate Ld computation:  P(Y <= Lc | p_xd) <= betaLd, ($=\gamma_{FN}$)
+and solve for xd (*=LOD Limit of Detection*).
+ 
+
+Lq is less well defined.  The literature suggests using Lq = beta0 + 10 s.e.(beta0), but this
+uses the normality assumption.  Other literature suggests using the "analyte concentration xq (*=LOQ Limit of Quantification*)
+for which the experimental relative standard deviation of the responses reaches a fixed level ($=\gamma_Q$),
+for example, the level 0.1." Lavagnini and Magno 2007.  I interpret the term "relative
+standard deviation" to mean the coefficient of variation, CV = sd/mean.
+
+In the exercise below, we use the fits from the ML models to estimate the Lc, Ld and Lq, for
+various values of NN replicates for a new observation, i.e. a new (unknown concentration) response
+number of detects.
+Both the intercept and no intercept models are considered.
+
+```{r LcLdLqNN0, echo=FALSE}
+# No intercept model computations - Here Lc==0
+# Lc computation:  P(Y > Lc | S=0) <= alphaLc 
+#  where Y ~ Bin(m, p=1 - exp(-betas[1]))
+#  to incorporate estimation uncertaintly in betas[1], use upper limit of conf int
+#  i.e. Y ~ Bin(m, p=1 - exp(-(betas[1] + 1.96 * s.e.(betas[1])))
+# Ld computation:  P(Y <= Lc | p_xd) <= betaLd
+#  use relationship between Binomial and Beta distribution, p 278 Bain
+# Lq computation:  (Forootan 2017)  choose level, Sj, such that CV<=gammaLq
+#  not clear which scale: response, back-transformed values, ... ?
+#
+##* Note in R:  The quantile is defined as the smallest value x such 
+##    that F(x) ≥ p, where F is the distribution function.
+
+## Set values for alphaLC, betaLd, gammaLq
+alphaLc <- betaLd <- .05; gammaLq <- .20
+NN <- c(3, 8, 16, 24, 32, 48, 64, 96)  #test number of replicates
+
+#set up tables for manuscript output
+Lc.all0 <- matrix(0, nrow=nTargets, ncol=length(NN))
+row.names(Lc.all0) <- uTargets
+colnames(Lc.all0) <- paste(NN)
+xdd.all0 <- xd.all0 <- xd_upper.all0 <- xd_lower.all0 <- xq.all0 <- xq_upper.all0 <- 
+  xq_lower.all0 <- Lc.all0 
+
+
+for(i in 1:nTargets){
+  #use beta estimated from fits above
+     if(nrow(nndetect[[i]]) < 3) {
+     cat(paste('Too few values for ', uTargets[i]), '\n') 
+     next}
+
+  betas <- (Calib.fit.estimates0[[i]])[,1]
+  
+  #ML Takes into account uncertainty in new observation and s.e. of betas
+  betas.upper <- betas + 1.96 * (Calib.fit.estimates0[[i]])[,2]
+  betas.lower <- betas - 1.96 * (Calib.fit.estimates0[[i]])[,2]
+  
+  #Want: P(Y > Lc | S=0) <= alphaLc where Y ~ Bin(m, p=1 - exp(-betas[1]))
+  #Lc at xc=0 values for new observation
+  
+  # For no intercept model, P(Y = 0 | S=0)=1 and P(i'th tech rep detect| S=0)=0
+  #  Lc==0, and the P(Y > Lc | S=0) <= alphaLc
+  #  since P(Y > 0 | S=0)==0.  
+  # We are saying that sample is negative if Y=0 and positive if Y>0
+
+  Lc <- rep(0, length(NN))
+
+  #Want xd, P(Y <= Lc | p_xd) <= betaLd
+  #Ld and xd calculation
+  pxd <- 1 - qbeta(betaLd, NN-Lc, Lc+1)   #proportion detected
+  Ld <- NN * pxd
+  xd <- ( - log(1 - pxd)) / betas   #concentration
+  xdlower <- ( - log(1 - pxd)) / betas.upper
+  xdupper <- ( - log(1 - pxd)) / betas.lower
+  names(pxd) <- names(xd) <- names(xdlower) <- names(xdupper) <- paste(NN)
+  
+  #Compute confidence interval for xd
+  xd.all0[i,] <- xd
+  xd_upper.all0[i,] <- xdupper
+  xd_lower.all0[i,] <- xdlower
+
+  #Compute model based xq
+  xq <- -(log(1 - 1/(1 + gammaLq^2*NN)))/betas
+  names(xq) <- paste(NN)
+
+  #Compute model based xq using lower estimates of beta - upper bound for xq
+  xq_lower <- -(log(1 - 1/(1 + gammaLq^2*NN)))/betas.lower
+  names(xq_lower) <- paste(NN)
+ 
+  #Compute model based xq using upper estimates of beta
+  xq_upper <- -(log(1 - 1/(1 + gammaLq^2*NN)))/betas.upper
+  names(xq_upper) <- paste(NN)
+
+  xq.all0[i,] <- xq
+  xq_lower.all0[i,] <- xq_lower
+  xq_upper.all0[i,] <- xq_upper
+
+  }
+
+
+  
+#For a given p_hat, one can compute the sample size m required to attain a
+#  CV  <= gammaLq, as   m >= (1-phat)/(phat*gammaLq)
+
+```
+
+# Determine Lc, Ld, Lq (LOB, LOD and LOQ) - intercept model
+
+
+```{r LcLdLqNN, echo=FALSE}
+# Lc computation:  P(Y > Lc | S=0) <= alphaLc - intercept model computations
+#  where Y ~ Bin(m, p=1 - exp(-betas[1]))
+#  to incorporate estimation uncertaintly in betas[1], use upper limit of conf int
+#  i.e. Y ~ Bin(m, p=1 - exp(-(betas[1] + 1.96 * s.e.(betas[1])))
+# Ld computation:  P(Y <= Lc | p_xd) <= betaLd
+#  use relationship between Binomial and Beta distribution, p 278 Bain
+# Lq computation:  (Forootan 2017)  choose level, Sj, such that CV<=gammaLq
+#  not clear which scale: response, back-transformed values, ... ?
+#
+##* Note in R:  The quantile is defined as the smallest value x such 
+##    that F(x) ≥ p, where F is the distribution function.
+
+## Set values for alphaLC, betaLd, gammaLq
+alphaLc <- betaLd <- .05; gammaLq <- .20
+NN <- c(3, 8, 16, 24, 32, 48, 64, 96)  #test number of replicates
+
+#set up tables for manuscript output
+Lc.all <- matrix(0, nrow=nTargets, ncol=length(NN))
+row.names(Lc.all) <-  uTargets
+colnames(Lc.all) <-  paste(NN)
+Lc.upper.all <- xd.all <- xd_upper.all <- xd_lower.all <- 
+  xq.all <- xq_lower.all <- xq_upper.all <- Lc.all 
+
+for(i in 1:nTargets){
+  #use beta estimated from fits above
+     if(nrow(nndetect[[i]]) < 3) {
+     cat(paste('Too few values for ', uTargets[i]), '\n') 
+     next}
+
+  betas <- (Calib.fit.estimates[[i]])[,1]
+  
+  #ML Takes into account uncertainty in new observation and s.e. of betas
+  betas.upper <- betas + 1.96 * (Calib.fit.estimates[[i]])[,2]
+  betas.lower <- pmax(0, betas - 1.96 * (Calib.fit.estimates[[i]])[,2])
+  
+  #Want: P(Y > Lc | S=0) <= alphaLc where Y ~ Bin(m, p=1 - exp(-betas[1]))
+  #Lc at xc=0 values for new observation
+  p.new <- 1 - exp(-betas[1])
+  Lc.new <- qbinom(1 - alphaLc, size=NN, prob=p.new)
+  names(Lc.new) <- paste(NN) 
+  Lc.all[i,] <- Lc.new
+  
+  #Lc.upper at xc=0 values for new observation, incl s.e. of betas
+  p.upper <- 1 - exp(-betas.upper[1])
+  Lc.upper <- qbinom(1 - alphaLc, size=NN, prob=p.upper)
+  names(Lc.upper) <- paste(NN) 
+  Lc.upper.all[i,] <- Lc.upper
+  
+  #Want xd, P(Y <= Lc | p_xd) <= betaLd
+  #Ld and xd calculation
+  pxd <- 1 - qbeta(betaLd, NN-Lc.new, Lc.new+1)   #proportion detected
+  Ld <- NN * pxd
+  xd <- (-betas[1] - log(1 - pxd)) / betas[2]   #concentration
+  names(pxd) <- names(xd) <- paste(NN)
+
+  # pxd_upper <- 1 - qbeta(betaLd, NN-Lc.upper, Lc.upper+1)   #proportion detected\
+  # Ld_upper <- NN * pxd_upper
+  # xd_upper <- (-betas[1] - log(1 - pxd_upper)) / betas[2]   #concentration
+  xd_lower <- pmax(0, (-betas.upper[1] - log(1 - pxd)) / betas.upper[2])
+  xd_upper <- (-betas.lower[1] - log(1 - pxd)) / betas.lower[2]
+  names(xd_upper) <- names(xd_lower) <- paste(NN)
+
+  xd.all[i,] <- xd
+  xd_upper.all[i,] <- xd_upper
+  xd_lower.all[i,] <- xd_lower
+  
+  #Compute model based xq
+  xq <- -(betas[1] + log(1 - 1/(1 + gammaLq^2*NN)))/betas[2]
+  names(xq) <- paste(NN)
+
+  #Compute model based xq using lower estimates of beta
+  xq_lower <- -(betas.lower[1] + log(1 - 1/(1 + gammaLq^2*NN)))/betas.lower[2]
+  names(xq_lower) <- paste(NN)
+  
+  #Compute model based xq using upper estimates of beta
+  xq_upper <- -(betas.upper[1] + log(1 - 1/(1 + gammaLq^2*NN)))/betas.upper[2]
+  names(xq_upper) <- paste(NN)
+
+
+  xq.all[i,] <- xq
+  xq_lower.all[i,] <- xq_lower
+  xq_upper.all[i,] <- xq_upper
+
+
+  }
+
+
+  
+#For a given p_hat, one can compute the sample size m required to attain a
+#  CV  <= gammaLq, as   m >= (1-phat)/(phat*gammaLq)
+
+```
+
+\pagebreak
+
+# Estimates, Lc, Ld, Lq (LOB, LOD, LOQ) and confidence limits for a given number of technical reps NN[NNi]
+
+Chooses the model (intercept versus no intercept) with the best LLR test fit,
+i.e. the largest p-value for the LLR test.  A table of values for all
+assays is printed.  
+
+```{r ChooseModel, echo=FALSE}
+# Set the index into NN which is defined in chunk LcLdLqNN0 and LcLdLqNN  
+# NNi <- 2 corresponds to the 2nd entry of NN
+NNi <- 2
+
+#cat('Limits intercept model for N=', NN[NNi])
+xdxq.all <- cbind(Lc=Lc.all[,NNi], 
+                  # LcUp=Lc.upper.all[,NNi],
+                   SdLow=xd_lower.all[,NNi],  
+                   Sd=xd.all[,NNi], SdUp=xd_upper.all[,NNi],
+                   SqLow=xq_upper.all[,NNi],
+                   Sq=xq.all[,NNi], SqUp=xq_lower.all[,NNi])
+
+
+#cat('Limits for no intercept model for N=', NN[NNi])
+xdxq.all0 <- cbind(Lc=0, SdLow=xd_lower.all0[,NNi],  
+                   Sd=xd.all0[,NNi], SdUp=xd_upper.all0[,NNi],
+                   SqLow=xq_upper.all0[,NNi], 
+                   Sq=xq.all0[,NNi], SqUp=xq_lower.all0[,NNi])
+
+#Include alpha and beta estimates in table
+alphabeta.se <- alphabeta0.se  <- matrix(0, nrow=nTargets, ncol=4)
+colnames(alphabeta.se) <- c("alpha","aSE", "beta", "bSE")
+colnames(alphabeta0.se) <- c("alpha","aSE", "beta", "bSE")
+rownames(alphabeta0.se) <- uTargets
+for (i in 1:nTargets){
+  if(nrowTarget[i]>2){
+  alphabeta.se[i,1:2] <- Calib.fit.estimates[[i]][1, 1:2]
+  alphabeta.se[i, 3:4] <- Calib.fit.estimates[[i]][2, 1:2]
+  alphabeta0.se[i, 3:4] <- Calib.fit.estimates0[[i]][1, 1:2]
+  }
+}
+
+
+
+Calib.choice <- Calib.fit.LLRp > Calib.fit.LLRp0
+xdxq.choice <- cbind(InterModel=Calib.choice, alphabeta0.se, xdxq.all0)
+xdxq.choice[Calib.choice, 6:12] <- xdxq.all[Calib.choice,]
+xdxq.choice[Calib.choice, 2:5] <- alphabeta.se[Calib.choice,]
+
+# NNi <- 2 This is set above
+cat('Limits for best choice model for N=', NN[NNi], '\n')
+print(round(xdxq.choice[nrowTarget > 2,], digits=2))
+
+
+
+```
+
+\pagebreak
+
+# Tables and Graphs for the manuscript
+
+*Revised for general use to use all eligible targets. * 
+
+```{r Manuscript, echo=FALSE, eval=TRUE, include=TRUE}
+ManuTargets <- (1:nTargets)[nrowTarget > 2] #choose all eligible targets
+#Manusink <- FALSE  #writes to output files when set to TRUE
+Manusink <- TRUE
+
+#V20220912 added output results for both intercept and no-intercept models
+# Intercept Limits table
+{
+if(Manusink){ 
+      sink(file(paste("Outputs\\LimitsInter.txt", sep=""), 
+            encoding="UTF-8"), split=TRUE)
+}
+xdxq.all.PR <- cbind(alphabeta.se, xdxq.all)
+xdxq.all.PR <- xdxq.all.PR[nrowTarget>2, , drop=FALSE]
+xdxq.all.PR <- xdxq.all.PR[order(row.names(xdxq.all.PR)), , drop=FALSE]
+colnames(xdxq.all.PR)[5:11] <- c('LOB','LODL','LOD','LODU','LOQL','LOQ','LOQU')
+print(knitr::kable(round(xdxq.all.PR, 
+                    digits=1), 
+                    format="pandoc", digits=1, 
+#   caption='Intercept model: Estimates, Critical, Detection, Quantification Limits and CIs',
+                     results="asis"))
+if(Manusink){ sink()}
+}
+
+# No Intercept Limits table
+{
+if(Manusink){ 
+      sink(file(paste("Outputs\\LimitsNoInter.txt", sep=""), 
+            encoding="UTF-8"), split=TRUE)
+}
+xdxq.all0.PR <- cbind(alphabeta0.se, xdxq.all0)
+xdxq.all0.PR <- xdxq.all0.PR[nrowTarget>2, , drop=FALSE]
+xdxq.all0.PR <- xdxq.all0.PR[order(row.names(xdxq.all0.PR)), , drop=FALSE]
+colnames(xdxq.all0.PR)[5:11] <- c('LOB','LODL','LOD','LODU','LOQL','LOQ','LOQU')
+print(knitr::kable(round(xdxq.all0.PR, 
+                    digits=1), 
+                    format="pandoc", digits=1, 
+#   caption='No intercept model: Estimates, Critical, Detection, Quantification Limits and CIs',
+                     results="asis"))
+if(Manusink){ sink()}
+}
+
+
+
+# Best Model Limits table
+{
+if(Manusink){ 
+      sink(file(paste("Outputs\\Limits.txt", sep=""), 
+            encoding="UTF-8"), split=TRUE)
+}
+xdxq.choice.PR <- xdxq.choice[nrowTarget>2, -1, drop=FALSE]
+xdxq.choice.PR <- xdxq.choice.PR[order(row.names(xdxq.choice.PR)), , drop=FALSE]
+colnames(xdxq.choice.PR)[5:11] <- c('LOB','LODL','LOD','LODU','LOQL','LOQ','LOQU')
+print(knitr::kable(round(xdxq.choice.PR, 
+                    digits=1), 
+                    format="pandoc", digits=1, 
+#   caption='Estimates, Critical, Detection, Quantification Limits and CIs',
+                     results="asis"))
+if(Manusink){ sink()}
+}
+
+
+# Summary stats for all assays which were modelled
+{
+if(Manusink){
+  sink(file("Outputs\\Data.txt", encoding="UTF-8"),
+       split=TRUE)
+  }
+for(Targeti in ManuTargets){
+  jmat <- nndetect[[Targeti]][, c(2:4, 12, 10)]
+  row.names(jmat) <- NULL
+  names(jmat) <- c("S", "num.detect", "n", "p.tilde", "lambda.tilde")
+  print(knitr::kable(jmat, 
+                     format="pandoc", digits=3, caption=uTargets[Targeti]),
+                     results="asis")
+}
+if(Manusink){ sink()}
+}
+
+
+#V20220912 printed all model output results for both intercept and no-intercept models
+{
+ if(Manusink){
+    sink(file(paste("Outputs\\ResultsAll.txt", sep=""), 
+            encoding="UTF-8"), split=TRUE)
+  }
+# Print regression outputs
+for(Targeti in ManuTargets){
+#  if (Calib.choice[Targeti]){
+  cat("\n", as.character(uTargets[Targeti]), "\n")
+  cat("Convergence=", Calib.fit.res$convergence[Targeti], "\n")
+  printCoefmat(Calib.fit.estimates[[Targeti]], digits=3)
+  cat('LLR test stat=', Calib.fit.res$LLR[Targeti], ', df= ', 
+      Calib.fit.res$degf[Targeti], ', p-value=', Calib.fit.res$Pval[Targeti], "\n\n")
+#  } else {
+   cat("\n", as.character(uTargets[Targeti]), "\n")
+   cat("Convergence=", Calib.fit.res0$convergence[Targeti], "\n")
+   printCoefmat(Calib.fit.estimates0[[Targeti]], digits=3)
+   cat('LLR test stat=', Calib.fit.res0$LLR[Targeti], ', df= ', 
+      Calib.fit.res0$degf[Targeti], ', p-value=', Calib.fit.res0$Pval[Targeti], "\n\n")
+#  }
+}
+if(Manusink) sink()
+}
+
+## Manuscript plots to file
+# pdf('Outputs\\gBlockPlots.pdf')
+#par(mfrow=c(1,2))
+par(mfrow=c(2,2))
+
+# Plots of fits using chosen no-intercept/intercept model
+#V20220912 plotted all output results for both intercept and no-intercept models
+
+for(Targeti in ManuTargets){
+  Target.dat <- nndetect[[Targeti]]
+  
+#  if (Calib.choice[Targeti]){
+  Calib.fit <- Calib.fit.all[[Targeti]]
+  Calib.fitted <- Calib.fit$par[1] + Calib.fit$par[2]*  Target.dat$SQ  
+  
+  # Plot calibration curve on lambda scale
+  maxSQ <- max(Target.dat$SQ)
+  maxlamhat <- max(Target.dat$lamhat)
+
+  plot(Target.dat$SQ, Target.dat$lamhat, xlog=TRUE, 
+       ylab='Mean Copy Estimate',
+       xlab='Starting copy number',
+       ylim=c(0, 4), xlim=c(0, maxSQ), las=1, 
+#      ylim=c(0, maxlamhat), xlim=c(0, maxSQ), las=1, 
+       main=uTargets[Targeti])
+  abline(Calib.fit$par[1], Calib.fit$par[2], col=4)
+  legend("topleft", legend=c('ML fit'), lty=1, col=4, bty="n")
+  arrows(Target.dat$SQ, Target.dat$Lamhatex.Lower, Target.dat$SQ, 
+         Target.dat$Lamhatex.Upper,
+         length=0.05, angle=90, code=3)
+
+  # Plot calibration curve on phat scale
+  # Compute minSQ such that phat~=1 (1-phat = .99)
+  maxSQa <-max( -(Calib.fit$par[1] + log(.01))/Calib.fit$par[2], maxSQ)
+  sqs <- seq(0, maxSQa, by=.1)
+  Calib.phat <- 1 - exp(-(Calib.fit$par[1] + Calib.fit$par[2] * sqs))
+
+  plot(sqs, Calib.phat, xlog=TRUE, 
+       ylab='Proportion detect', xlab='Starting copy number', type='l', col=4, las=1, 
+       ylim=c(0, 1), xlim=c(0, maxSQa),  main=paste('Intercept',uTargets[Targeti]))
+  points(Target.dat$SQ, Target.dat$phat)
+  legend("topleft", legend=c('ML fit'), lty=1, col=4, bty="n")
+  
+#  } else {
+
+  #Compute fitted values for ML model
+  Calib.fit <- Calib.fit.all0[[Targeti]]
+  Calib.fitted <- Calib.fit$par *  Target.dat$SQ
+  
+  # Plot calibration curve on lambda scale
+  maxSQ <- max(Target.dat$SQ)
+  maxlamhat <- max(Target.dat$lamhat)
+
+  plot(Target.dat$SQ, Target.dat$lamhat, xlog=TRUE, 
+       ylab='Mean Copy Estimate', xlab='Starting copy number',
+       ylim=c(0, 4), xlim=c(0, maxSQ), las=1, 
+ #     ylim=c(0, maxlamhat), xlim=c(0, maxSQ), las=1, 
+      main=uTargets[Targeti])
+  abline(0, Calib.fit$par, col=4)
+  legend("topleft", legend=c('ML fit'), lty=1, col=4, bty="n")
+  arrows(Target.dat$SQ, Target.dat$Lamhatex.Lower, Target.dat$SQ, 
+         Target.dat$Lamhatex.Upper,
+         length=0.05, angle=90, code=3)
+
+  # Plot calibration curve on phat scale
+  # Compute minSQ such that phat~=1 (1-phat = .99)
+  maxSQa <-max( -( log(.01))/Calib.fit$par, maxSQ)
+  sqs <- seq(0, maxSQa, by=.1)
+  Calib.phat <- 1 - exp(-( Calib.fit$par * sqs))
+
+  plot(sqs, Calib.phat, xlog=TRUE, 
+       ylab='Proportion detect', xlab='Starting copy number', type='l', col=4, las=1, 
+       ylim=c(0, 1), xlim=c(0, maxSQa),  main=paste('No intercept', uTargets[Targeti]))
+  points(Target.dat$SQ, Target.dat$phat)
+  legend("topleft", legend=c('ML fit'), lty=1, col=4, bty="n")
+  
+}
+  
+  cat("\n\n")
+#}
+
+# Plot limits of detection
+# Note:  the same vertical scale is used for all assays
+#V20220912 plotted all limit results for both intercept and no-intercept models
+
+max.xd_upper <- max(xd_upper.all[ManuTargets,], xd_upper.all0[ManuTargets,])
+for(Targeti in ManuTargets){
+#max.xq_lower <- max(xq_lower.all[Targeti,])
+
+#  if (Calib.choice[Targeti]){
+  plot(NN, xd.all[Targeti,], ylab='LOD',
+       xlab='m, number of replicates', xaxt='n', 
+       ylim=c(0, max.xd_upper), xlim=c(min(NN), max(NN)),  las=1,   
+       main=paste('Limits detect - intercept', uTargets[Targeti]))
+#        main=uTargets[Targeti])
+  axis(1, at=NN)
+ 
+  # Transformed Exact CI
+  arrows(NN, xd_lower.all[Targeti,], NN, 
+        xd_upper.all[Targeti,],
+         length=0.05, angle=90, code=3)
+#  } else {
+
+
+  plot(NN, xd.all0[Targeti,], ylab='LOD',
+       xlab='m, number of replicates', xaxt='n', 
+       ylim=c(0, max.xd_upper), xlim=c(min(NN), max(NN)),  las=1,   
+       main=paste('Limits detect - no intercept', uTargets[Targeti]))
+#       main=uTargets[Targeti])
+  axis(1, at=NN)
+ 
+  # Transformed Exact CI
+  arrows(NN, xd_lower.all0[Targeti,], NN, 
+        xd_upper.all0[Targeti,],
+         length=0.05, angle=90, code=3)
+}
+  
+  cat("\n\n")
+  
+  
+#}
+
+# Plots limits of Quantification
+# Note:  the same vertical scale is used for all assays
+#V20220912 plotted all output results for both intercept and no-intercept models
+
+max.xq_lower <- max(xq_lower.all[ManuTargets,], xq_lower.all0[ManuTargets,])
+for(Targeti in ManuTargets){
+
+#  if (Calib.choice[Targeti]){
+  plot(NN, xq.all[Targeti,], ylab='LOQ',
+       xlab='m, number of replicates', xaxt='n', 
+       ylim=c(0, max.xq_lower), xlim=c(min(NN), max(NN)),  las=1,   
+       main=paste('Limits quant - intercept', uTargets[Targeti]))
+#        main=uTargets[Targeti])
+  axis(1, at=NN)
+ 
+  # Transformed Exact CI
+  arrows(NN, xq_upper.all[Targeti,], NN, 
+        xq_lower.all[Targeti,],
+         length=0.05, angle=90, code=3)
+#  } else {
+
+#max.xq_lower <- max(xq_lower.all0[Targeti,])
+
+  plot(NN, xq.all0[Targeti,], ylab='LOQ',
+       xlab='m, number of replicates', xaxt='n', 
+       ylim=c(0, max.xq_lower), xlim=c(min(NN), max(NN)),  las=1,   
+       main=paste('Limits quant - no intercept', uTargets[Targeti]))
+#     main=uTargets[Targeti])
+  axis(1, at=NN)
+ 
+  # Transformed Exact CI
+  arrows(NN, xq_upper.all0[Targeti,], NN, 
+        xq_lower.all0[Targeti,],
+         length=0.05, angle=90, code=3)
+}
+  
+  cat("\n\n")
+#}
+
+#dev.off()
+par(mfrow=c(1,1))
+```
+
+
+
+
+
+
