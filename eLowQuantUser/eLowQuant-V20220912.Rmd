@@ -529,7 +529,7 @@ The standard errors are obtained from the Hessian matrix
   Target.dat <- nndetect[[i]]
   SQS0.fit0 <- matrix(0, ncol=4, nrow=0)
   
-  for(nd0 in 1:(nn0-1)){
+  for(nd0 in 0:(nn0-1)){
 
       CalibS0.fit <- optim(par=c(1, 3), fn=CalibS0Or.LLik,  nd=Target.dat$detect,
                      S=Target.dat$SQ, nn=Target.dat$n, nd0=nd0, nn0=nn0,
@@ -550,7 +550,7 @@ The standard errors are obtained from the Hessian matrix
   if(sink.indicator) sink(file(paste("Outputs\\MLNoInterSQ0",uTargets[i],
             ".txt", sep=""), 
             encoding="UTF-8"), split=TRUE)
-  print(knitr::kable(cbind(NumDetects=1:nrow(SQS0.fit0), SQS0.fit0[,3:4]), 
+  print(knitr::kable(cbind(NumDetects=0:(nn0-1), SQS0.fit0[,3:4]), 
                      format="pandoc", digits=3),results="asis")
 
   if(sink.indicator) sink()
@@ -757,7 +757,7 @@ The standard errors are obtained from the Hessian matrix
   Target.dat <- nndetect[[i]]
   SQS0.fit <- matrix(0, ncol=6, nrow=0)
   
-  for(nd0 in 1:(nn0-1)){
+  for(nd0 in 0:(nn0-1)){
 
    jlm <- lm(lamhat ~ SQ, data=Target.dat) #starting values for alpha and beta
    jpar <- pmax(c(0.01, 0.01), coef(jlm))
@@ -788,7 +788,7 @@ The standard errors are obtained from the Hessian matrix
     sink(file(paste("Outputs\\MLSQ0",uTargets[i],".txt", sep=""), 
             encoding="UTF-8"), split=TRUE)
   }
-  print(knitr::kable(cbind(NumDetects=1:nrow(SQS0.fit), SQS0.fit[,5:6]), 
+  print(knitr::kable(cbind(NumDetects=0:(nn0-1), SQS0.fit[,5:6]), 
                      format="pandoc", digits=3),results="asis")
 
   if(sink.indicator) sink()
@@ -1052,7 +1052,7 @@ xdxq.all0 <- cbind(Lc=0, SdLow=xd_lower.all0[,NNi],
 alphabeta.se <- alphabeta0.se  <- matrix(0, nrow=nTargets, ncol=4)
 colnames(alphabeta.se) <- c("alpha","aSE", "beta", "bSE")
 colnames(alphabeta0.se) <- c("alpha","aSE", "beta", "bSE")
-rownames(alphabeta0.se) <- uTargets
+rownames(alphabeta0.se) <- rownames(alphabeta.se) <- uTargets
 for (i in 1:nTargets){
   if(nrowTarget[i]>2){
   alphabeta.se[i,1:2] <- Calib.fit.estimates[[i]][1, 1:2]
@@ -1087,11 +1087,11 @@ ManuTargets <- (1:nTargets)[nrowTarget > 2] #choose all eligible targets
 #Manusink <- FALSE  #writes to output files when set to TRUE
 Manusink <- TRUE
 
-#V20220912 added output results for both intercept and no-intercept models
-# Intercept Limits table
+#V20220912 added output results for both intercept and no intercept models
+# Intercept table
 {
 if(Manusink){ 
-      sink(file(paste("Outputs\\LimitsInter.txt", sep=""), 
+      sink(file(paste("Outputs\\LimitsAll.txt", sep=""), 
             encoding="UTF-8"), split=TRUE)
 }
 xdxq.all.PR <- cbind(alphabeta.se, xdxq.all)
@@ -1106,10 +1106,10 @@ print(knitr::kable(round(xdxq.all.PR,
 if(Manusink){ sink()}
 }
 
-# No Intercept Limits table
+# No Intercept table
 {
 if(Manusink){ 
-      sink(file(paste("Outputs\\LimitsNoInter.txt", sep=""), 
+      sink(file(paste("Outputs\\LimitsAll0.txt", sep=""), 
             encoding="UTF-8"), split=TRUE)
 }
 xdxq.all0.PR <- cbind(alphabeta0.se, xdxq.all0)
@@ -1126,7 +1126,7 @@ if(Manusink){ sink()}
 
 
 
-# Best Model Limits table
+
 {
 if(Manusink){ 
       sink(file(paste("Outputs\\Limits.txt", sep=""), 
@@ -1143,8 +1143,6 @@ print(knitr::kable(round(xdxq.choice.PR,
 if(Manusink){ sink()}
 }
 
-
-# Summary stats for all assays which were modelled
 {
 if(Manusink){
   sink(file("Outputs\\Data.txt", encoding="UTF-8"),
@@ -1162,7 +1160,7 @@ if(Manusink){ sink()}
 }
 
 
-#V20220912 printed all model output results for both intercept and no-intercept models
+#V20220912 printed all output results
 {
  if(Manusink){
     sink(file(paste("Outputs\\ResultsAll.txt", sep=""), 
@@ -1193,7 +1191,7 @@ if(Manusink) sink()
 par(mfrow=c(2,2))
 
 # Plots of fits using chosen no-intercept/intercept model
-#V20220912 plotted all output results for both intercept and no-intercept models
+#V20220912 plotted all output results
 
 for(Targeti in ManuTargets){
   Target.dat <- nndetect[[Targeti]]
@@ -1270,7 +1268,7 @@ for(Targeti in ManuTargets){
 
 # Plot limits of detection
 # Note:  the same vertical scale is used for all assays
-#V20220912 plotted all limit results for both intercept and no-intercept models
+#V20220912 plotted all output results
 
 max.xd_upper <- max(xd_upper.all[ManuTargets,], xd_upper.all0[ManuTargets,])
 for(Targeti in ManuTargets){
@@ -1311,7 +1309,7 @@ for(Targeti in ManuTargets){
 
 # Plots limits of Quantification
 # Note:  the same vertical scale is used for all assays
-#V20220912 plotted all output results for both intercept and no-intercept models
+#V20220912 plotted all output results
 
 max.xq_lower <- max(xq_lower.all[ManuTargets,], xq_lower.all0[ManuTargets,])
 for(Targeti in ManuTargets){
