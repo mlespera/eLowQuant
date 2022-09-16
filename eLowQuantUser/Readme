@@ -3,4 +3,4 @@ eDNA Low copy number Quantification
 This folder contains a user-ready version of the original R code and training resources to get started on using eLowQuant for any appropriate input data. It contains a video outline pdf, R, Rmd and csv file.  Watch the eLowQuant training video to learn how to implement the eLowQuant code for yourself here: https://onlineacademiccommunity.uvic.ca/helbinglab/edna/.
 
 
-The latest version, V20220912, writes and plots results from the Manuscript chunk for BOTH the intercept and no-intercept models.  The earlier version wrote and plotted results only for the best fitting of the intercept/no-intercept models.
+The LATEST VERSION, V20220912, writes and plots results from the Manuscript chunk for BOTH the intercept and no-intercept models.  The earlier version wrote and plotted results only for the best fitting of the intercept/no-intercept models.
